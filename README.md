@@ -1,6 +1,16 @@
 # Permutation-Invariant Set Autoencoder
 
 ## [Paper](https://arxiv.org/abs/2302.12826)
+```
+@inproceedings{pisa,
+  title = {Permutation-Invariant Set Autoencoders with Fixed-Size Embeddings for Multi-Agent Learning},
+  author = {Kortvelesy, Ryan and Morad, Steven and Prorok, Amanda},
+  year = {2023},
+  booktitle = {Proceedings of the 22nd International Conference on Autonomous Agents and Multiagent Systems},
+  publisher = {International Foundation for Autonomous Agents and Multiagent Systems},
+  series = {AAMAS '23}
+}
+```
 
 ## Introduction
 
@@ -21,7 +31,7 @@ We provide two models: AutoEncoder, and AutoEncoderPos. They are identical, exce
 ## Installation
 
 ```bash
-cd SetAutoEncoder
+cd sae
 pip install -e .
 ```
 
