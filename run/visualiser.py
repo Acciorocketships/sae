@@ -9,7 +9,9 @@ class Visualiser:
 		self.reset()
 
 	def reset(self):
-		self.fig, self.ax = pyplot.subplots(figsize=(10,10))
+		pyplot.cla()
+		self.fig = pyplot.gcf()
+		self.ax = pyplot.gca()
 
 
 	def show_objects(self, x, agent_pos=torch.zeros(2), **kwargs):

@@ -45,7 +45,7 @@ class AutoEncoder(nn.Module):
 		size_loss = torch.mean(mean_squared_loss(vars["n_pred_logits"], vars["n"].unsqueeze(-1).detach().float()))
 		if torch.isnan(mse_loss):
 			mse_loss = 0
-		loss = 100 * mse_loss + 1e-3 * size_loss
+		loss = 100 * mse_loss + 1 * size_loss
 		corr = correlation(x[tgt_idx], xr[pred_idx])
 		return {
 			"loss": loss,
@@ -73,10 +73,12 @@ class Encoder(nn.Module):
 		self.cardinality = torch.nn.Linear(1, self.hidden_dim)
 
 	def sort(self, x, batch):
+		if x.shape[0] == 0:
+			return x, batch
 		mag = self.rank(x)
 		max_mag = torch.max(mag) + 0.0001
 		batch_mag = batch * max_mag
-		new_mag = mag.squeeze() + batch_mag
+		new_mag = batch_mag + mag.squeeze()
 		_, idx_sorted = torch.sort(new_mag)
 		x_sorted = x[idx_sorted]
 		xs_idx = idx_sorted
@@ -111,7 +113,7 @@ class Encoder(nn.Module):
 
 	def get_x_perm(self):
 		'Returns: the permutation applied to the inputs (shape: ninputs)'
-		return self.xs_idx
+		return self.xs_idx.long()
 
 	def get_z(self):
 		'Returns: the latent state (shape: batch x hidden_dim)'
@@ -153,7 +155,7 @@ class Decoder(nn.Module):
 		# z: batch_size x hidden_dim
 		n_logits = self.size_pred(z) # batch_size x max_n
 		n = torch.round(n_logits, decimals=0).squeeze(-1).int()
-		n = torch.minimum(n, torch.tensor(self.max_n-1))
+		n = torch.minimum(n, torch.tensor(self.max_n))
 		n = torch.maximum(n, torch.tensor(0))
 		self.n_pred_logits = n_logits
 		self.n_pred = n

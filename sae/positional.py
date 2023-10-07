@@ -45,12 +45,10 @@ class PositionalEncoding(nn.Module):
 		return torch.argmax(x, dim=-1)
 
 	def sinusoid(self, x: Tensor):
-		max_n = torch.max(x)+1
-		pe = torch.zeros(max_n, self.dim, device=x.device)  # like 10x4
-		position = torch.arange(0, max_n, dtype=torch.float, device=x.device).unsqueeze(1)
+		pe = torch.zeros(x.shape[0], self.dim, device=x.device)  # like 10x4
 		div_term = torch.exp(torch.arange(0, self.dim, 2, device=x.device).float() * (-math.log(10000.0) / self.dim))
-		pe[:, 0::2] = torch.sin(position * div_term)
-		pe[:, 1::2] = torch.cos(position * div_term)
+		pe[:, 0::2] = torch.sin(x.unsqueeze(1) * div_term)
+		pe[:, 1::2] = torch.cos(x.unsqueeze(1) * div_term)
 		return pe
 
 
@@ -62,19 +60,20 @@ if __name__ == '__main__':
 	max_n = 5
 	batch_size = 16
 
-	pos = PositionalEncoding(dim=3, mode='binary')
-	x = torch.randn(10,3)
-	b = pos.binary_logits_to_binary(x)
-	i = pos.binary_to_int(b)
+	# pos = PositionalEncoding(dim=3, mode='binary')
+	# x = torch.randn(10,3)
+	# b = pos.binary_logits_to_binary(x)
+	# i = pos.binary_to_int(b)
 
-	pos = PositionalEncoding(dim=6, mode='binary')
-	k = torch.arange(4)
-	keys = pos(k)
-	n = pos.binary_to_int(keys)
-	y = torch.rand(k.shape[0], 6)
-	loss1 = cross_entropy(y, k, reduction='none')
-	loss2 = cross_entropy(y, keys, reduction='none')
+	# pos = PositionalEncoding(dim=6, mode='binary')
+	# k = torch.arange(4)
+	# keys = pos(k)
+	# n = pos.binary_to_int(keys)
+	# y = torch.rand(k.shape[0], 6)
+	# loss1 = cross_entropy(y, k, reduction='none')
+	# loss2 = cross_entropy(y, keys, reduction='none')
 
-	pos = PositionalEncoding(dim=8, mode='sinusoid')
-	k = torch.arange(5)
+	pos = PositionalEncoding(dim=4, mode='sinusoid')
+	k = torch.tensor([0., 0.0001, 0.001, 0.01, 0.1, 1., 10.])
 	keys = pos(k)
+	print(keys)

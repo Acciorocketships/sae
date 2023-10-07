@@ -4,29 +4,35 @@ import wandb
 import inspect
 import traceback
 from sae import get_loss_idxs, correlation
-from sae.sae_model import AutoEncoder
-# from sae.baseline_tspn import AutoEncoder as AutoEncoderTSPN
-# from sae.baseline_dspn import AutoEncoder as AutoEncoderDSPN
-# from sae.baseline_rnn import AutoEncoder as AutoEncoderRNN
+from sae import AutoEncoder
+from sae import AutoEncoderPos
+from sae.baseline_tspn import AutoEncoder as AutoEncoderTSPN
+from sae.baseline_dspn import AutoEncoder as AutoEncoderDSPN
+from sae.baseline_rnn import AutoEncoder as AutoEncoderRNN
 from visualiser import Visualiser
 
 torch.set_printoptions(precision=2, sci_mode=False)
-model_path_base="saved/sae_rand-{name}-{hidden_dim}.pt"
+model_path_base="saved/{name}-{dim}-{max_n}-{hidden_dim}.pt"
 
-project = "sae-rand-exp"
+user = "" # wandb user name (for logging)
+project = "sae-test" # wandb project name
 
 def experiments():
+	# this dict specifies the experiments that will be run. the keys are the experiment names, and the values are lists of experiments
+	# each experiment in the list must be provided with a model. the rest of the config will be drawn from the default config.
+	# an experiment can also override a default config by setting (e.g. setting "save": True in the experiment dict)
 	trials = {
-		"sae": [{"model": AutoEncoder, "hidden_dim": 64, "runs": 1, "save": False}],
-		# "dspn": [{"model": AutoEncoderDSPN, "hidden_dim": 96, "runs": 1, "save": False}],
-		# "rnn": [{"model": AutoEncoderRNN, "hidden_dim": 96, "runs": 1, "save": True}],
-		# "tspn": [{"model": AutoEncoderTSPN, "hidden_dim": 96, "runs": 1, "save": True}],
+		"sae": [{"model": AutoEncoder, "save": False}],
+		"sae_pos": [{"model": AutoEncoderPos, "save": False}],
+		# "dspn": [{"model": AutoEncoderDSPN}],
+		# "rnn": [{"model": AutoEncoderRNN}],
+		# "tspn": [{"model": AutoEncoderTSPN}],
 	}
 	default = {
 		"dim": 16,
-		"hidden_dim": 96,
-		"max_n": 4,
-		"epochs": 25000,
+		"hidden_dim": 256,
+		"max_n": 16,
+		"epochs": 50000,
 		"load": False,
 		"save": False,
 		"log": True,
@@ -40,7 +46,7 @@ def experiments():
 			config = default.copy()
 			config.update(cfg)
 			config["name"] = name
-			config["model_path"] = model_path_base.format(name=name, hidden_dim=config["hidden_dim"])
+			config["model_path"] = model_path_base.format(name=name, dim=config["dim"], max_n=config["max_n"], hidden_dim=config["hidden_dim"])
 			for run_num in range(config["runs"]):
 				for retry in range(1,config["retries"]+1):
 					try:
@@ -82,7 +88,7 @@ def run(
 
 	if log:
 		wandb.init(
-			entity="prorok-lab",
+			entity=user,
 			project=project,
 			group=name,
 			config=config,
@@ -104,7 +110,11 @@ def run(
 		size_list = []
 		for i in range(batch_size):
 			# n = torch.randint(low=1, high=max_n, size=(1,))
-			n = torch.tensor([max_n])
+			# n = torch.tensor([max_n])
+			n = torch.minimum(
+				((max_n+1)**2 * torch.rand(1) / max_n).int(),
+				 torch.tensor(max_n)
+				)
 			x = torch.randn(n[0], dim)
 			data_list.append(x)
 			size_list.append(n)
@@ -125,24 +135,25 @@ def run(
 
 		optim.zero_grad()
 
-		var = model.get_vars()
-		pred_idx, tgt_idx = get_loss_idxs(var["n_pred"], var["n"])
-		corr = correlation(var["x"][tgt_idx], var["xr"][pred_idx])
+		# var = model.get_vars()
+		# pred_idx, tgt_idx = get_loss_idxs(var["n_pred"], var["n"])
+		# corr = correlation(var["x"][tgt_idx], var["xr"][pred_idx])
 
 		if log:
 			log_data = {
 				**loss_data,
-				"corr": corr,
+				# "corr": corr,
 			}
 
-			# if t % 10 == 0:
-			# 	x0 = x[batch==0]
-			# 	xr0 = xr[batchr==0]
-			# 	vis.reset()
-			# 	vis.show_objects(xr0.cpu().detach())
-			# 	vis.show_objects(x0.cpu().detach(), alpha=0.3, linestyle="dashed")
-			# 	plt = vis.render()
-			# 	log_data["visualisation"] = plt
+			if t % 100 == 0:
+				x0 = x[batch==0]
+				xr0 = xr[batchr==0]
+				vis.reset()
+				vis.show_objects(xr0.cpu().detach())
+				vis.show_objects(x0.cpu().detach(), alpha=0.3, linestyle="dashed")
+				plt = vis.render()
+				img = wandb.Image(plt)
+				log_data["visualisation"] = img
 
 			wandb.log(log_data)
 

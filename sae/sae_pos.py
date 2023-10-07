@@ -5,17 +5,18 @@ from sae.mlp import build_mlp
 from sae.positional import PositionalEncoding
 from sae.loss import get_loss_idxs, correlation, mean_squared_loss
 
+# sae_pos: Uses sinusoidal encoding instead of onehot
 
-class AutoEncoder(nn.Module):
+class AutoEncoderPos(nn.Module):
 
 	def __init__(self, *args, **kwargs):
 		'''
 		Must have self.encoder and self.decoder objects, which follow the encoder and decoder interfaces
 		'''
 		super().__init__()
-		self.shared = Shared(*args, **kwargs)
-		self.encoder = Encoder(shared=self.shared, *args, **kwargs)
-		self.decoder = Decoder(shared=self.shared, *args, **kwargs)
+		self.encoder = EncoderPos(*args, **kwargs)
+		self.decoder = DecoderPos(*args, **kwargs)
+		# self.decoder.key_net = self.encoder.key_net
 
 	def forward(self, x, batch=None):
 		z = self.encoder(x, batch)
@@ -57,22 +58,32 @@ class AutoEncoder(nn.Module):
 
 
 
-class Encoder(nn.Module):
+class EncoderPos(nn.Module):
 
-	def __init__(self, dim, hidden_dim=64, shared=None, **kwargs):
+	def __init__(self, dim, hidden_dim=64, key_dim=8, **kwargs):
 		super().__init__()
 		# Params
 		self.input_dim = dim
 		self.hidden_dim = hidden_dim
-		self.shared = shared
 		# Modules
+		self.pos_gen = PositionalEncoding(dim=key_dim, mode="sinusoid")
+		self.key_net = build_mlp(input_dim=key_dim, output_dim=self.hidden_dim, nlayers=2, midmult=1.,layernorm=True, nonlinearity=nn.Mish)
 		self.val_net = build_mlp(input_dim=self.input_dim, output_dim=self.hidden_dim, nlayers=2, midmult=1.,layernorm=True, nonlinearity=nn.Mish)
 		self.rank = torch.nn.Linear(self.input_dim, 1)
+		self.cardinality = torch.nn.Linear(1, self.hidden_dim)
 
-	def sort(self, x):
-		mag = self.rank(x).reshape(-1)
-		_, idx = torch.sort(mag, dim=0)
-		return x[idx], idx
+	def sort(self, x, batch):
+		if x.shape[0] == 0:
+			return x, batch
+		mag = self.rank(x)
+		max_mag = torch.max(mag) + 0.0001
+		batch_mag = batch * max_mag
+		new_mag = mag.squeeze() + batch_mag
+		_, idx_sorted = torch.sort(new_mag)
+		x_sorted = x[idx_sorted]
+		xs_idx = idx_sorted
+		xs = x_sorted
+		return xs, xs_idx
 
 	def forward(self, x, batch=None, n_batches=None):
 		# x: n x input_dim
@@ -82,36 +93,27 @@ class Encoder(nn.Module):
 		self.batch = batch
 
 		n = scatter(src=torch.ones(x.shape[0], device=x.device), index=batch, dim_size=n_batches).long()  # batch_size
-		ptr = torch.cumsum(torch.cat([torch.zeros(1, device=x.device), n]), dim=0).int()
 		self.n = n
 
-		# Zip set start and ends
-		xs = []
-		xs_idx = []
-		for i, j in zip(ptr[:-1], ptr[1:]):
-			x_sorted, idx_sorted = self.sort(x[i:j, :])
-			xs.append(x_sorted)
-			xs_idx.append(idx_sorted + i)
-		xs = torch.cat(xs, dim=0) # total_nodes x input_dim
-		xs_idx = torch.cat(xs_idx, dim=0)
-		self.xs_idx_rev = torch.empty_like(xs_idx, device=x.device).scatter_(0, xs_idx, torch.arange(xs_idx.numel(), device=x.device))
+		# Sort
+		xs, xs_idx = self.sort(x, batch)
 		self.xs = xs
 		self.xs_idx = xs_idx
 
-		k = torch.cat([torch.arange(ni, device=x.device) for ni in n], dim=0).int() # batch_size]
-		keys = self.shared.get_key(k)
+		keys = torch.cat([torch.arange(ni, device=x.device) for ni in n], dim=0).int() # batch_size]
+		pos = self.pos_gen(keys) # batch_size x hidden_dim
 
 		# Encoder
-		y = self.val_net(xs) * keys  # total_nodes x hidden_dim
+		y = self.val_net(xs) * self.key_net(pos)  # total_nodes x hidden_dim
 		z_elements = scatter(src=y, index=batch, dim=-2, dim_size=n_batches)  # batch_size x dim
-		n_enc = self.shared.cardinality(n.unsqueeze(-1).float())
+		n_enc = self.cardinality(n.unsqueeze(-1).float())
 		z = z_elements + n_enc
 		self.z = z
 		return z
 
 	def get_x_perm(self):
 		'Returns: the permutation applied to the inputs (shape: ninputs)'
-		return self.xs_idx
+		return self.xs_idx.long()
 
 	def get_z(self):
 		'Returns: the latent state (shape: batch x hidden_dim)'
@@ -131,37 +133,37 @@ class Encoder(nn.Module):
 
 
 
-class Decoder(nn.Module):
+class DecoderPos(nn.Module):
 
-	def __init__(self, dim, hidden_dim=64, shared=None, **kwargs):
+	def __init__(self, dim, hidden_dim=64, key_dim=8, **kwargs):
 		super().__init__()
 		# Params
 		self.output_dim = dim
 		self.hidden_dim = hidden_dim
-		self.shared = shared
 		# Modules
+		self.pos_gen = PositionalEncoding(dim=key_dim, mode="sinusoid")
+		self.key_net = build_mlp(input_dim=key_dim, output_dim=self.hidden_dim, nlayers=2, midmult=1., layernorm=True, nonlinearity=nn.Mish)
 		self.decoder = build_mlp(input_dim=self.hidden_dim, output_dim=self.output_dim, nlayers=2, midmult=1., layernorm=False, nonlinearity=nn.Mish)
 		self.size_pred = build_mlp(input_dim=self.hidden_dim, output_dim=1, nlayers=2, layernorm=True, nonlinearity=nn.Mish)
 
 	def forward(self, z):
 		# z: batch_size x hidden_dim
-		n_logits = self.size_pred(z.real) # batch_size x 1
+		n_logits = self.size_pred(z) # batch_size x 1
 		n = torch.round(n_logits, decimals=0).squeeze(-1).int()
+		# n = torch.minimum(n, torch.tensor(self.max_n-1))
 		n = torch.maximum(n, torch.tensor(0))
 		self.n_pred_logits = n_logits
 		self.n_pred = n
 
-		n_enc = self.shared.cardinality(n.unsqueeze(1).float())
-		z = z - n_enc
-
 		k = torch.cat([torch.arange(n[i], device=z.device) for i in range(n.shape[0])], dim=0)
-		keys = self.shared.get_key(k)
-		# breakpoint()
+		pos = self.pos_gen(k) # total_nodes x key_dim
+
+		keys = self.key_net(pos)
+
 		vals_rep = torch.repeat_interleave(z, n, dim=0)
 		zp = vals_rep * keys
-		zp_real = zp.real
 
-		x = self.decoder(zp_real)
+		x = self.decoder(zp)
 		batch = torch.repeat_interleave(torch.arange(n.shape[0], device=z.device), n, dim=0)
 
 		self.x = x
@@ -177,7 +179,7 @@ class Decoder(nn.Module):
 		return self.x
 
 	def get_n_pred_logits(self):
-		'Returns: the class logits for each possible n (shape: batch x 1)'
+		'Returns: the class prediction, unrounded'
 		return self.n_pred_logits
 
 	def get_n_pred(self):
@@ -186,34 +188,14 @@ class Decoder(nn.Module):
 
 
 
-class Shared(nn.Module):
-
-	def __init__(self, dim, hidden_dim, **kwargs):
-		super().__init__()
-		self.dim = dim
-		self.hidden_dim = hidden_dim
-		self.cardinality = torch.nn.Linear(1, self.hidden_dim)
-
-	def get_key(self, key):
-		t = torch.linspace(0, 1, self.hidden_dim)
-		ti = torch.complex(torch.zeros_like(t), t)
-		if isinstance(key, int) or isinstance(key, float) or (isinstance(key, torch.Tensor) and key.dim()==0):
-			return torch.exp(ti * key * 8)
-		elif isinstance(key, torch.Tensor) and key.dim()==1:
-			return torch.exp(ti[None,:] * key[:,None] * 8)
-		else:
-			raise ValueError("key must be 0d or a 1d torch tensor")
-
-
 if __name__ == '__main__':
 
 	dim = 3
 	max_n = 5
-	batch_size = 8
+	batch_size = 16
 
-	sae = AutoEncoder(dim=dim, hidden_dim=15)
-	enc = sae.encoder
-	dec = sae.decoder
+	enc = EncoderPos(dim=dim)
+	dec = DecoderPos(dim=dim)
 
 	data_list = []
 	batch_list = []
