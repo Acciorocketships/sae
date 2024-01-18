@@ -11,8 +11,11 @@ def cross_entropy_loss(x1, x2):
     return cross_entropy(x1, x2, reduction='none')
 
 
-def mean_squared_loss(x1, x2):
-    return torch.mean(mse_loss(x1, x2, reduction='none'), dim=-1)
+def mean_squared_loss(x1, x2, weighting=None):
+    mse = mse_loss(x1, x2, reduction='none')
+    if weighting is not None:
+        mse = mse * torch.tensor(weighting, device=x1.device)[None,:]
+    return mse.mean(dim=-1)
 
 
 def get_loss_idxs(set1_lens, set2_lens):

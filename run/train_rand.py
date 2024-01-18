@@ -5,7 +5,6 @@ import inspect
 import traceback
 from sae import get_loss_idxs, correlation
 from sae import AutoEncoder
-from sae import AutoEncoderPos
 from sae.baseline_tspn import AutoEncoder as AutoEncoderTSPN
 from sae.baseline_dspn import AutoEncoder as AutoEncoderDSPN
 from sae.baseline_rnn import AutoEncoder as AutoEncoderRNN
@@ -14,7 +13,6 @@ from visualiser import Visualiser
 torch.set_printoptions(precision=2, sci_mode=False)
 model_path_base="saved/{name}-{dim}-{max_n}-{hidden_dim}.pt"
 
-user = "" # wandb user name (for logging)
 project = "sae-rand" # wandb project name
 
 def experiments():
@@ -23,7 +21,6 @@ def experiments():
 	# an experiment can also override a default config by setting (e.g. setting "save": True in the experiment dict)
 	trials = {
 		"sae": [{"model": AutoEncoder, "save": False}],
-		"sae_pos": [{"model": AutoEncoderPos, "save": False}],
 		# "dspn": [{"model": AutoEncoderDSPN}],
 		# "rnn": [{"model": AutoEncoderRNN}],
 		# "tspn": [{"model": AutoEncoderTSPN}],
@@ -88,7 +85,6 @@ def run(
 
 	if log:
 		wandb.init(
-			entity=user,
 			project=project,
 			group=name,
 			config=config,

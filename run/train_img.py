@@ -7,7 +7,6 @@ import torchvision
 import tqdm
 import wandb
 
-user = ""
 wandb_project = "sae-img"
 model_path = "saved/sae_img.pt"
 device = "cpu" if not torch.cuda.is_available() else "cuda"
@@ -92,7 +91,7 @@ class ImgSetAE(nn.Module):
 
 def main():
     if wandb_project is not None:
-        wandb.init(entity=user, project=wandb_project, group="sae")
+        wandb.init(project=wandb_project, group="sae")
     transform = transforms.Compose(
         [transforms.ToTensor(),
          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])

@@ -28,6 +28,7 @@ class AutoEncoder(nn.Module):
 			"n": self.encoder.get_n(),
 			"x": self.encoder.get_x(),
 			"xr": self.decoder.get_x_pred(),
+			"perm": self.encoder.get_x_perm(),
 		}
 		return self.vars
 
@@ -41,24 +42,28 @@ class AutoEncoder(nn.Module):
 		pred_idx, tgt_idx = get_loss_idxs(vars["n_pred"], vars["n"])
 		x = vars["x"]
 		xr = vars["xr"]
-		mse_loss = torch.mean(mean_squared_loss(x[tgt_idx], xr[pred_idx]))
+		mse_loss = torch.mean(mean_squared_loss(x[tgt_idx], xr[pred_idx], weighting=None))
 		size_loss = torch.mean(mean_squared_loss(vars["n_pred_logits"], vars["n"].unsqueeze(-1).detach().float()))
 		if torch.isnan(mse_loss):
 			mse_loss = 0
 		loss = 100 * mse_loss + 1 * size_loss
 		corr = correlation(x[tgt_idx], xr[pred_idx])
+		x_var = x.var(dim=0).mean()
+		xr_var = xr.var(dim=0).mean()
 		return {
 			"loss": loss,
 			"size_loss": size_loss,
 			"mse_loss": mse_loss,
 			"corr": corr,
+			"x_var": x_var,
+			"xr_var": xr_var,
 		}
 
 
 
 class Encoder(nn.Module):
 
-	def __init__(self, dim, hidden_dim=64, max_n=64, **kwargs):
+	def __init__(self, dim, hidden_dim=64, max_n=8, **kwargs):
 		super().__init__()
 		# Params
 		self.input_dim = dim
@@ -73,10 +78,8 @@ class Encoder(nn.Module):
 		self.cardinality = torch.nn.Linear(1, self.hidden_dim)
 
 	def sort(self, x, batch):
-		if x.shape[0] == 0:
-			return x, batch
-		mag = self.rank(x)
-		max_mag = torch.max(mag) + 0.0001
+		mag = torch.abs(self.rank(x))
+		max_mag = torch.max(mag) #+ 0.0001
 		batch_mag = batch * max_mag
 		new_mag = batch_mag + mag.squeeze()
 		_, idx_sorted = torch.sort(new_mag)
@@ -113,7 +116,7 @@ class Encoder(nn.Module):
 
 	def get_x_perm(self):
 		'Returns: the permutation applied to the inputs (shape: ninputs)'
-		return self.xs_idx.long()
+		return self.xs_idx
 
 	def get_z(self):
 		'Returns: the latent state (shape: batch x hidden_dim)'
